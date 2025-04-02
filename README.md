@@ -27,6 +27,10 @@ This project consists of an ESP32-based swarm bot firmware and a Python-based GU
 2. Install Tkinter (usually pre-installed with Python):
    ```bash
    pip install tk
+3. Save the GUI script as swarm_bot_gui.py.
+4. Run the GUI with:
+   ```bash
+   python swarm_bot_gui.py
 ### Usage
    - `Open the GUI and select a formation.`
    - `If choosing a circle formation, enter a radius before clicking the button.`
