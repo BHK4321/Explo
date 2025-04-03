@@ -1,108 +1,163 @@
 #include <WiFi.h>
-#include <WiFiUdp.h>
+#include <PubSubClient.h>
+#include <Servo.h>
 
-WiFiUDP udp;
-IPAddress esp32IP(192, 168, 1, 101);
-const unsigned int udpPort = 4210;
+#define MOTOR1_ENA  5
+#define MOTOR1_IN1  18
+#define MOTOR1_IN2  19
+#define MOTOR2_ENB  21
+#define MOTOR2_IN3  22
+#define MOTOR2_IN4  23
+#define TRIG_PIN    12
+#define ECHO_PIN    14
+#define SERVO_PIN   27
 
-const int motor1Pin1 = 14;
-const int motor1Pin2 = 12;
-const int motor2Pin1 = 27;
-const int motor2Pin2 = 26;
+const char* ssid = "your_hotspot_ssid";
+const char* password = "your_hotspot_password";
+const char* mqtt_server = "your_laptop_ip";
 
-void setup() {
-  Serial.begin(115200);
-  WiFi.begin();
-  WiFi.config(esp32IP);
-  udp.begin(udpPort);
+WiFiClient espClient;
+PubSubClient client(espClient);
+Servo scanServo;
 
-  pinMode(motor1Pin1, OUTPUT);
-  pinMode(motor1Pin2, OUTPUT);
-  pinMode(motor2Pin1, OUTPUT);
-  pinMode(motor2Pin2, OUTPUT);
-}
+int botID = 0;
+bool idAssigned = false;
+float leftBotDistance, rightBotDistance;
 
-void loop() {
-  int packetSize = udp.parsePacket();
-  if (packetSize) {
-    char incomingPacket[255];
-    udp.read(incomingPacket, 255);
-    String command = String(incomingPacket);
-
-    if (command.startsWith("MOVE_STRAIGHT")) {
-      moveStraight(command.substring(14).toInt());
-    } else if (command.startsWith("FORM_CIRCLE")) {
-      formCircle(command.substring(12).toInt());
-    } else if (command.startsWith("FORM_TRIANGLE")) {
-      formTriangle(command.substring(14).toInt());
+void setup_wifi() {
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
     }
-  }
 }
 
-void moveStraight(int distance) {
-  digitalWrite(motor1Pin1, HIGH);
-  digitalWrite(motor2Pin1, HIGH);
-  digitalWrite(motor1Pin2, LOW);
-  digitalWrite(motor2Pin2, LOW);
-  delay(distance * 10);
-  stopMotors();
+void callback(char* topic, byte* message, unsigned int length) {
+    String command = "";
+    for (int i = 0; i < length; i++) {
+        command += (char)message[i];
+    }
+    
+    if (command == "align_straight") {
+        alignStraightLine();
+    }
 }
 
-void formCircle(int radius) {
-  for (int i = 0; i < 360; i++) {
-    analogWrite(motor1Pin1, map(i, 0, 360, 0, 255));
-    analogWrite(motor2Pin1, map(i, 0, 360, 255, 0));
-    delay(10);
-  }
-  stopMotors();
+void reconnect() {
+    while (!client.connected()) {
+        if (client.connect("ESP32_Bot")) {
+            client.subscribe("bot/command");
+            client.subscribe("bot/positions");
+        } else {
+            delay(5000);
+        }
+    }
 }
 
-void formTriangle(int sideLength) {
-  for (int i = 0; i < 3; i++) {
-    moveStraight(sideLength);
-    turnRight(120);
-  }
+void moveForward() {
+    digitalWrite(MOTOR1_IN1, HIGH);
+    digitalWrite(MOTOR1_IN2, LOW);
+    digitalWrite(MOTOR2_IN3, HIGH);
+    digitalWrite(MOTOR2_IN4, LOW);
+    analogWrite(MOTOR1_ENA, 150);
+    analogWrite(MOTOR2_ENB, 150);
 }
 
-void turnRight(int angle) {
-  digitalWrite(motor1Pin1, HIGH);
-  digitalWrite(motor2Pin2, HIGH);
-  digitalWrite(motor1Pin2, LOW);
-  digitalWrite(motor2Pin1, LOW);
-  delay(angle * 10);
-  stopMotors();
+void moveBackward() {
+    digitalWrite(MOTOR1_IN1, LOW);
+    digitalWrite(MOTOR1_IN2, HIGH);
+    digitalWrite(MOTOR2_IN3, LOW);
+    digitalWrite(MOTOR2_IN4, HIGH);
+    analogWrite(MOTOR1_ENA, 150);
+    analogWrite(MOTOR2_ENB, 150);
 }
 
 void stopMotors() {
-  digitalWrite(motor1Pin1, LOW);
-  digitalWrite(motor1Pin2, LOW);
-  digitalWrite(motor2Pin1, LOW);
-  digitalWrite(motor2Pin2, LOW);
+    digitalWrite(MOTOR1_IN1, LOW);
+    digitalWrite(MOTOR1_IN2, LOW);
+    digitalWrite(MOTOR2_IN3, LOW);
+    digitalWrite(MOTOR2_IN4, LOW);
 }
 
-// Formation Control for Swarm Bots
-void maintainStraightLine(int leaderSpeed) {
-  int followerSpeed = leaderSpeed - 10; // Adjust based on distance sensors
-  analogWrite(motor1Pin1, leaderSpeed);
-  analogWrite(motor2Pin1, leaderSpeed);
-  delay(5000); // Move forward for a duration
-  stopMotors();
+long measureDistance(int angle) {
+    scanServo.write(angle);
+    delay(500);
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    return pulseIn(ECHO_PIN, HIGH) * 0.034 / 2;
 }
 
-void maintainTriangleFormation(int leaderSpeed) {
-  int leftBotSpeed = leaderSpeed - 10;
-  int rightBotSpeed = leaderSpeed - 10;
-  analogWrite(motor1Pin1, leaderSpeed);
-  analogWrite(motor2Pin1, leaderSpeed);
-  delay(2000);
-  turnRight(60); // Adjust to form the triangle
-  delay(2000);
-  stopMotors();
+void assignBotID() {
+    if (!idAssigned) {
+        long frontDistance = measureDistance(90);
+        if (frontDistance > 50) {
+            botID = 2;
+        } else {
+            botID = (measureDistance(90) < 30) ? 3 : 1;
+        }
+        idAssigned = true;
+        String msg = "Bot ID: " + String(botID);
+        Serial.println(msg);
+        client.publish("bot/positions", msg.c_str());
+    }
 }
 
-void synchronizedCircularRotation(int speed) {
-  analogWrite(motor1Pin1, speed);
-  analogWrite(motor2Pin1, speed - 20); // outer wheel makes faster
-  delay(5000);
-  stopMotors();
+void alignStraightLine() {
+    Serial.println("Aligning in a straight line...");
+    assignBotID();
+    
+    if (botID == 2) {
+        return; // Middle bot remains stationary
+    }
+    
+    long middleToLeft = measureDistance(180);
+    long middleToRight = measureDistance(0);
+    
+    if (botID == 1) {
+        while (measureDistance(90) > middleToLeft) {
+            moveForward();
+        }
+        while (measureDistance(90) < middleToLeft) {
+            moveBackward();
+        }
+    }
+    else if (botID == 3) {
+        while (measureDistance(90) > middleToRight) {
+            moveForward();
+        }
+        while (measureDistance(90) < middleToRight) {
+            moveBackward();
+        }
+    }
+    stopMotors();
 }
+
+void setup() {
+    pinMode(MOTOR1_ENA, OUTPUT);
+    pinMode(MOTOR1_IN1, OUTPUT);
+    pinMode(MOTOR1_IN2, OUTPUT);
+    pinMode(MOTOR2_ENB, OUTPUT);
+    pinMode(MOTOR2_IN3, OUTPUT);
+    pinMode(MOTOR2_IN4, OUTPUT);
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    
+    Serial.begin(115200);
+    scanServo.attach(SERVO_PIN);
+    
+    setup_wifi();
+    client.setServer(mqtt_server, 1883);
+    client.setCallback(callback);
+}
+
+void loop() {
+    if (!client.connected()) {
+        reconnect();
+    }
+    client.loop();
+    alignStraightLine();
+    delay(3000);
+}
+i

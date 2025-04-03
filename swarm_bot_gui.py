@@ -4,6 +4,7 @@ from tkinter import messagebox
 def send_command(command):
     # Placeholder function to send commands to bots
     messagebox.showinfo("Command Sent", f"Command: {command}")
+    
 
 def send_circle_command():
     radius = radius_entry.get()
