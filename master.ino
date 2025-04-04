@@ -1,13 +1,9 @@
+#include "config.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <QTRSensors.h>
 #include <L298N.h>
 #include <PubSubClient.h>  // Include MQTT library
-
-// WiFi and MQTT Broker details
-const char* ssid = "Aa";
-const char* password = "12345678";
-const char* mqtt_server = "192.168.1.100"; // Set the correct MQTT broker IP
 
 WiFiClient espClient;
 PubSubClient client(espClient);
