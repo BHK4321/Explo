@@ -1,4 +1,2 @@
 config.h
-c_cpp_properties.json
-launch.json
-settings.json
+.vscode/
